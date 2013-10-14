@@ -68,12 +68,24 @@ struct Counter
 	string pav;
 	int count;
 public:
-	Counter(string pav):pav(pav), count(0){}
+	Counter(string pav, int count):pav(pav), count(count){}
+	Counter(string line);
 	int operator++(){return ++count;}
 	int operator--(){return --count;}
 	bool operator==(const Counter &other){return pav == other.pav;}
 	bool operator<(const Counter &other){return pav < other.pav;}
 };
+
+Counter::Counter(string line)
+{
+	int start, end;
+	start = 0;
+	end = line.find(' ');
+	pav = line.substr(0, end);
+	start = end + 1;
+	end = line.find(' ', start);
+	count = stoi(line.substr(start, end - start));
+}
 
 class Buffer
 {
@@ -89,8 +101,7 @@ public:
 void Buffer::Add(string pav)
 {
 	semaphore.Wait();
-	Counter c(pav);
-	++c;
+	Counter c(pav, 1);
 	auto i = find(buffer.begin(), buffer.end(), c);
 	if(i != buffer.end())
 	{
@@ -116,7 +127,7 @@ void Buffer::Add(string pav)
 bool Buffer::Take(string pav)
 {
 	semaphore.Wait();
-	Counter c(pav);
+	Counter c(pav, 0);
 	auto i = find(buffer.begin(), buffer.end(), c);
 	if(i != buffer.end())
 	{
@@ -148,6 +159,7 @@ string Print(int nr, Struct &s);
 void syncOut(vector<vector<Struct>>&);
 
 vector<vector<Struct>> ReadStuff(string file);
+vector<vector<Counter>> ReadCounters(string file);
 vector<string> ReadLines(string file);
 void Make(vector<Struct> stuff);
 vector<Counter> Use(vector<Counter> stuff);
@@ -158,20 +170,13 @@ volatile bool done = false;
 int main()
 {
 	auto input = ReadStuff("LapunasD_L2.txt");
+	auto userStuff = ReadCounters("LapunasD_L2.txt");
 
 	cout << Titles() << endl;
 	syncOut(input);
 
 	vector<thread> makers;
 	vector<future<vector<Counter>>> users;
-
-	Counter one[] = {Counter("Vienas"), Counter("Trys")};
-	Counter two[] = {Counter("Du"), Counter("Dviratis"), Counter("Keturi")};
-	Counter three[] = {Counter("Keturi"), Counter("Penki"), Counter("Vienas")};
-	vector<vector<Counter>> userStuff;
-	userStuff.emplace_back(one, one + 2);
-	userStuff.emplace_back(two, two + 3);
-	userStuff.emplace_back(three, three + 3);
 
 	for(auto &v : input)
 		makers.emplace_back(Make, v);
@@ -192,6 +197,8 @@ int main()
 		cout << endl;
 	}
 
+
+
 	system("pause");
 	return 0;
 }
@@ -203,10 +210,13 @@ vector<vector<Struct>> ReadStuff(string file)
 	vector<Struct> tmp;
 	for(unsigned int i = 0; i < lines.size(); i++)
 	{
+		if(lines[i] == "vartotojai")
+		{
+			break;
+		}
 		if(lines[i] == "")
 		{
-			ret.push_back(tmp);
-			tmp = vector<Struct>();
+			ret.push_back(move(tmp));
 		}
 		else
 		{
@@ -225,6 +235,27 @@ vector<string> ReadLines(string file)
 		string line;
 		getline(duom, line);
 		ret.push_back(line);
+	}
+	return ret;
+}
+
+vector<vector<Counter>> ReadCounters(string file)
+{
+	auto lines = ReadLines(file);
+	vector<vector<Counter>> ret;
+	vector<Counter> tmp;
+	int i;
+	for(i = 0; i < lines.size(); i++)
+	{
+		if(lines[i] == "vartotojai")
+			break;
+	}
+	for(i++; i < lines.size(); i++)
+	{
+		if(lines[i] == "")
+			ret.push_back(move(tmp));
+		else
+			tmp.emplace_back(lines[i]);
 	}
 	return ret;
 }
@@ -265,13 +296,29 @@ void Make(vector<Struct> stuff)
 
 vector<Counter> Use(vector<Counter> stuff)
 {
-	int i = 0;
-	while(!done || buffer.Size() > 0)
+	auto i = stuff.begin();
+	while((!done || buffer.Size() > 0) && stuff.size() > 0)
 	{
-		if(buffer.Take(stuff[i].pav))
-			++stuff[i];
+		if(buffer.Take((*i).pav))
+			--(*i);
+
+		else if(done)
+		{
+			stuff.erase(i);
+			i = stuff.begin();
+			continue;
+		}
+		if((*i).count <= 0)
+		{
+			stuff.erase(i);
+			i = stuff.begin();
+			continue;
+		}
+
 		i++;
-		i %= stuff.size();
+		if(i == stuff.end())
+			i = stuff.begin();
+
 	}
 	return stuff;
 }

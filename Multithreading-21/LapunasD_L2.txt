@@ -38,3 +38,15 @@ Dviratis 9 22.10916881121813
 Keturi 15 11.17773635285403
 Vienas 3 16.615564382024736
 Vienas 18 0.20338860362065336
+
+vartotojai
+Trys 5
+Vienas 1
+
+Du 1
+Dviratis 2
+Keturi 8
+
+Keturi 1
+Penki 2
+Vienas 1
