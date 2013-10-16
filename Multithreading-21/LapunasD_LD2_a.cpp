@@ -68,6 +68,7 @@ class Buffer
 {
 	vector<Counter> buffer;
 	condition_variable accessCondition;
+	condition_variable overflowCondition;
 	bool accessing;
 	mutex mtx;
 public:
@@ -78,6 +79,7 @@ public:
 private:
 	void LockAccess();
 	void UnlockAcces();
+	static const int MAX = 5;
 };
 
 void Buffer::LockAccess()
@@ -95,8 +97,11 @@ void Buffer::UnlockAcces()
 
 void Buffer::Add(string pav)
 {
-	LockAccess();
 	Counter c(pav, 1);
+	unique_lock<mutex> lock(mtx);
+	overflowCondition.wait(lock, [=]{return buffer.size() < MAX;});
+	lock.unlock();
+	LockAccess();
 	auto i = find(buffer.begin(), buffer.end(), c);
 	if(i != buffer.end())
 	{
@@ -115,6 +120,7 @@ void Buffer::Add(string pav)
 		}
 		if(buffer.size() == size)
 			buffer.push_back(c);
+		overflowCondition.notify_one();
 	}
 	UnlockAcces();
 }
@@ -135,6 +141,7 @@ bool Buffer::Take(string pav)
 		found = true;
 	}
 	UnlockAcces();
+	overflowCondition.notify_one();
 	return found;
 }
 
@@ -236,7 +243,7 @@ vector<vector<Counter>> ReadCounters(string file)
 	auto lines = ReadLines(file);
 	vector<vector<Counter>> ret;
 	vector<Counter> tmp;
-	int i;
+	unsigned int i;
 	for(i = 0; i < lines.size(); i++)
 	{
 		if(lines[i] == "vartotojai")
