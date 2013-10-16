@@ -11,29 +11,6 @@
 
 using namespace std;
 
-class Semaphore
-{
-private:
-	mutex mtx;
-	condition_variable condition;
-    int count;
-
-public:
-	Semaphore():count(1){}
-    void Notify()
-    {
-		unique_lock<mutex> lock(mtx);
-		count++;
-        condition.notify_one();
-    }
-    void Wait()
-    {
-		unique_lock<mutex> lock(mtx);
-		condition.wait(lock, [=]{return count > 0;});
-		count--;
-    }
-};
-
 struct Struct
 {
 	string pav;
@@ -90,17 +67,35 @@ Counter::Counter(string line)
 class Buffer
 {
 	vector<Counter> buffer;
-	Semaphore semaphore;
+	condition_variable accessCondition;
+	bool accessing;
+	mutex mtx;
 public:
-	Buffer(){}
+	Buffer():accessing(false){}
 	void Add(string pav);
 	bool Take(string pav);
 	int Size();
+private:
+	void LockAccess();
+	void UnlockAcces();
 };
+
+void Buffer::LockAccess()
+{
+	unique_lock<mutex> lock(mtx);
+	accessCondition.wait(lock, [=]{return !accessing;});
+	accessing = true;
+}
+
+void Buffer::UnlockAcces()
+{
+	accessing = false;
+	accessCondition.notify_one();
+}
 
 void Buffer::Add(string pav)
 {
-	semaphore.Wait();
+	LockAccess();
 	Counter c(pav, 1);
 	auto i = find(buffer.begin(), buffer.end(), c);
 	if(i != buffer.end())
@@ -121,14 +116,15 @@ void Buffer::Add(string pav)
 		if(buffer.size() == size)
 			buffer.push_back(c);
 	}
-	semaphore.Notify();
+	UnlockAcces();
 }
 
 bool Buffer::Take(string pav)
 {
-	semaphore.Wait();
+	LockAccess();
 	Counter c(pav, 0);
 	auto i = find(buffer.begin(), buffer.end(), c);
+	bool found = false;
 	if(i != buffer.end())
 	{
 		--(*i);
@@ -136,21 +132,17 @@ bool Buffer::Take(string pav)
 		if((*i).count <= 0)
 			buffer.erase(i);
 
-		semaphore.Notify();
-		return true;
+		found = true;
 	}
-	else
-	{
-		semaphore.Notify();
-		return false;
-	}
+	UnlockAcces();
+	return found;
 }
 
 int Buffer::Size()
 {
-	semaphore.Wait();
+	LockAccess();
 	int size = buffer.size();
-	semaphore.Notify();
+	UnlockAcces();
 	return size;
 }
 
