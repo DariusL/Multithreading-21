@@ -71,19 +71,16 @@ class Buffer
 {
 	vector<Counter> buffer;
 	condition_variable accessCondition;
-	condition_variable overflowCondition;
+	condition_variable emptyCondition;
 	bool accessing;
-	volatile int count;
-	static const int MAX = 200;
 	mutex mtx;
 public:
-	Buffer() : accessing(false), count(0){}
+	Buffer() : accessing(false){}
 	bool Add(Counter c);
 	int Take(Counter c);
 	int Size();
 	string Print();
 	void Done();
-	int GetCount(){return count;}
 private:
 	void LockAccess();
 	void UnlockAcces();
@@ -91,7 +88,7 @@ private:
 
 void Buffer::Done()
 {
-	overflowCondition.notify_all();
+	emptyCondition.notify_all();
 }
 
 void Buffer::LockAccess()
@@ -110,13 +107,9 @@ void Buffer::UnlockAcces()
 
 bool Buffer::Add(Counter c)
 {
-	unique_lock<mutex> lock(mtx);
-	overflowCondition.wait(lock, [=]{return GetCount() < MAX || doneUsing;});
-	lock.unlock();
 	if(doneUsing)
 		return false;
 	LockAccess();
-	count += c.count;
 	auto i = find(buffer.begin(), buffer.end(), c);
 	if(i != buffer.end())
 	{
@@ -135,14 +128,19 @@ bool Buffer::Add(Counter c)
 		}
 		if(buffer.size() == size)
 			buffer.push_back(c);
-		overflowCondition.notify_one();
 	}
+	emptyCondition.notify_one();
 	UnlockAcces();
 	return true;
 }
 
 int Buffer::Take(Counter c)
 {
+	unique_lock<mutex> lock(mtx);
+	emptyCondition.wait(lock, [=]{return buffer.size() > 0 || doneMaking;});
+	if(doneMaking)
+		return 0;
+	lock.unlock();
 	LockAccess();
 	auto i = find(buffer.begin(), buffer.end(), c);
 	int taken = 0;
@@ -157,9 +155,8 @@ int Buffer::Take(Counter c)
 		if((*i).count <= 0)
 			buffer.erase(i);
 	}
-	count -= taken;
 	UnlockAcces();
-	overflowCondition.notify_one();
+	emptyCondition.notify_one();
 	return taken;
 }
 
