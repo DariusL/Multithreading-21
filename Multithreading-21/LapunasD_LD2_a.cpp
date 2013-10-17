@@ -11,6 +11,9 @@
 
 using namespace std;
 
+volatile bool doneMaking = false;
+volatile bool doneUsing = false;
+
 struct Struct
 {
 	string pav;
@@ -73,14 +76,21 @@ class Buffer
 	mutex mtx;
 public:
 	Buffer():accessing(false){}
-	void Add(string pav);
-	bool Take(string pav);
+	bool Add(Counter c);
+	int Take(Counter c);
 	int Size();
+	string Print();
+	void Done();
 private:
 	void LockAccess();
 	void UnlockAcces();
-	static const int MAX = 5;
+	static const int MAX = 3;
 };
+
+void Buffer::Done()
+{
+	overflowCondition.notify_all();
+}
 
 void Buffer::LockAccess()
 {
@@ -91,21 +101,23 @@ void Buffer::LockAccess()
 
 void Buffer::UnlockAcces()
 {
+	unique_lock<mutex> lock(mtx);
 	accessing = false;
 	accessCondition.notify_one();
 }
 
-void Buffer::Add(string pav)
+bool Buffer::Add(Counter c)
 {
-	Counter c(pav, 1);
 	unique_lock<mutex> lock(mtx);
-	overflowCondition.wait(lock, [=]{return buffer.size() < MAX;});
+	overflowCondition.wait(lock, [=]{return buffer.size() < MAX || doneUsing;});
 	lock.unlock();
+	if(doneUsing)
+		return false;
 	LockAccess();
 	auto i = find(buffer.begin(), buffer.end(), c);
 	if(i != buffer.end())
 	{
-		++(*i);
+		(*i).count += c.count;
 	}
 	else
 	{
@@ -123,26 +135,28 @@ void Buffer::Add(string pav)
 		overflowCondition.notify_one();
 	}
 	UnlockAcces();
+	return true;
 }
 
-bool Buffer::Take(string pav)
+int Buffer::Take(Counter c)
 {
 	LockAccess();
-	Counter c(pav, 0);
 	auto i = find(buffer.begin(), buffer.end(), c);
-	bool found = false;
+	int taken = 0;
 	if(i != buffer.end())
 	{
-		--(*i);
+		if((*i).count >= c.count)
+			taken = c.count;
+		else
+			taken = (*i).count;
+		(*i).count -= taken;
 
 		if((*i).count <= 0)
 			buffer.erase(i);
-
-		found = true;
 	}
 	UnlockAcces();
 	overflowCondition.notify_one();
-	return found;
+	return taken;
 }
 
 int Buffer::Size()
@@ -153,29 +167,42 @@ int Buffer::Size()
 	return size;
 }
 
+string Buffer::Print()
+{
+	stringstream ss;
+	for(auto &c : buffer)
+		ss << c.pav << " " << c.count << endl;
+	return ss.str();
+}
+
 string Titles();
 string Print(int nr, Struct &s);
 void syncOut(vector<vector<Struct>>&);
+void syncOut(vector<vector<Counter>>&);
 
 vector<vector<Struct>> ReadStuff(string file);
 vector<vector<Counter>> ReadCounters(string file);
 vector<string> ReadLines(string file);
 void Make(vector<Struct> stuff);
 vector<Counter> Use(vector<Counter> stuff);
+void MakeObserver(vector<thread> &makers);
+void UseObserver(vector<future<vector<Counter>>> &users);
 
 Buffer buffer;
-volatile bool done = false;
 
 int main()
 {
 	auto input = ReadStuff("LapunasD_L2.txt");
 	auto userStuff = ReadCounters("LapunasD_L2.txt");
 
-	cout << Titles() << endl;
+	cout << "\nGamintojai\n\n";
 	syncOut(input);
+	cout << "\nVartotojai\n\n";
+	syncOut(userStuff);
 
 	vector<thread> makers;
 	vector<future<vector<Counter>>> users;
+	vector<thread> observers;
 
 	for(auto &v : input)
 		makers.emplace_back(Make, v);
@@ -183,20 +210,23 @@ int main()
 	for(auto &v : userStuff)
 		users.push_back(async(Use, v));
 
-	for(auto &t : makers)
-		t.join();
-	done = true;
+	observers.emplace_back(MakeObserver, makers);
+	observers.emplace_back(UseObserver, users);
+
+	for(auto &o : observers)
+		o.join();
+
+	cout << "Vartotojam truko:\n\n";
 
 	for(auto &f : users)
 	{
-		f.wait();
 		auto &res = f.get();
 		for(auto &c : res)
 			cout << c.pav << " " << c.count << endl;
 		cout << endl;
 	}
 
-
+	cout << "Nesuvartota liko:\n\n" << buffer.Print();
 
 	system("pause");
 	return 0;
@@ -271,11 +301,24 @@ void syncOut(vector<vector<Struct>> &data)
 	cout << setw(3) << "Nr" << Titles() << endl << endl;
 	for(unsigned int i = 0; i < data.size(); i++)
 	{
-		auto vec = data[i];
+		auto &vec = data[i];
 		cout << "Procesas_" << i << endl;
 		for(unsigned int j = 0; j < vec.size(); j++)
 		{
 			cout << Print(j, vec[j]) << endl;
+		}
+	}
+}
+
+void syncOut(vector<vector<Counter>> &data)
+{
+	for(unsigned int i = 0; i < data.size(); i++)
+	{
+		auto &vec = data[i];
+		cout << "Vartotojas_" << i << endl;
+		for(unsigned int j = 0; j < vec.size(); j++)
+		{
+			cout << setw(15) << vec[j].pav << setw(5) << vec[j].count << endl;
 		}
 	}
 }
@@ -290,34 +333,42 @@ string Print(int nr, Struct &s)
 void Make(vector<Struct> stuff)
 {
 	for(auto &s : stuff)
-		buffer.Add(s.pav);
+		buffer.Add(Counter(s.pav, s.kiekis));
 }
 
 vector<Counter> Use(vector<Counter> stuff)
 {
 	auto i = stuff.begin();
-	while((!done || buffer.Size() > 0) && stuff.size() > 0)
+	while((!doneMaking || buffer.Size() > 0) && stuff.size() > 0)
 	{
-		if(buffer.Take((*i).pav))
-			--(*i);
-
-		else if(done)
-		{
-			stuff.erase(i);
-			i = stuff.begin();
-			continue;
-		}
 		if((*i).count <= 0)
 		{
 			stuff.erase(i);
 			i = stuff.begin();
-			continue;
 		}
+		
+		int taken = buffer.Take((*i));
+		if(taken)
+			(*i).count -= taken;
 
 		i++;
 		if(i == stuff.end())
 			i = stuff.begin();
-
 	}
 	return stuff;
+}
+
+void MakeObserver(vector<thread> &makers)
+{
+	for(auto &t : makers)
+		t.join();
+	doneMaking = true;
+}
+
+void UseObserver(vector<future<vector<Counter>>> &users)
+{
+	for(auto &f : users)
+		f.wait();
+	buffer.Done();
+	doneUsing = true;
 }
