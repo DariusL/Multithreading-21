@@ -73,18 +73,20 @@ class Buffer
 	condition_variable accessCondition;
 	condition_variable overflowCondition;
 	bool accessing;
+	volatile int count;
+	static const int MAX = 200;
 	mutex mtx;
 public:
-	Buffer():accessing(false){}
+	Buffer() : accessing(false), count(0){}
 	bool Add(Counter c);
 	int Take(Counter c);
 	int Size();
 	string Print();
 	void Done();
+	int GetCount(){return count;}
 private:
 	void LockAccess();
 	void UnlockAcces();
-	static const int MAX = 3;
 };
 
 void Buffer::Done()
@@ -109,11 +111,12 @@ void Buffer::UnlockAcces()
 bool Buffer::Add(Counter c)
 {
 	unique_lock<mutex> lock(mtx);
-	overflowCondition.wait(lock, [=]{return buffer.size() < MAX || doneUsing;});
+	overflowCondition.wait(lock, [=]{return GetCount() < MAX || doneUsing;});
 	lock.unlock();
 	if(doneUsing)
 		return false;
 	LockAccess();
+	count += c.count;
 	auto i = find(buffer.begin(), buffer.end(), c);
 	if(i != buffer.end())
 	{
@@ -154,6 +157,7 @@ int Buffer::Take(Counter c)
 		if((*i).count <= 0)
 			buffer.erase(i);
 	}
+	count -= taken;
 	UnlockAcces();
 	overflowCondition.notify_one();
 	return taken;
@@ -210,8 +214,8 @@ int main()
 	for(auto &v : userStuff)
 		users.push_back(async(Use, v));
 
-	observers.emplace_back(MakeObserver, makers);
-	observers.emplace_back(UseObserver, users);
+	observers.emplace_back(MakeObserver, ref(makers));
+	observers.emplace_back(UseObserver, ref(users));
 
 	for(auto &o : observers)
 		o.join();
@@ -339,23 +343,26 @@ void Make(vector<Struct> stuff)
 vector<Counter> Use(vector<Counter> stuff)
 {
 	auto i = stuff.begin();
+	vector<Counter> ret;
 	while((!doneMaking || buffer.Size() > 0) && stuff.size() > 0)
 	{
-		if((*i).count <= 0)
+		i++;
+		if(i == stuff.end())
+			i = stuff.begin();
+
+		int taken = buffer.Take(*i);
+		(*i).count -= taken;
+
+		if(taken == 0 && doneMaking)
+			ret.push_back(*i);
+
+		if((*i).count <= 0 || (taken == 0 && doneMaking))
 		{
 			stuff.erase(i);
 			i = stuff.begin();
 		}
-		
-		int taken = buffer.Take((*i));
-		if(taken)
-			(*i).count -= taken;
-
-		i++;
-		if(i == stuff.end())
-			i = stuff.begin();
 	}
-	return stuff;
+	return ret;
 }
 
 void MakeObserver(vector<thread> &makers)

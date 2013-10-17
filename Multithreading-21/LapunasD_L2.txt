@@ -30,7 +30,7 @@ Keturi 10 3.143934172263675
 Keturi 9 8.979214608240632
 Trys 7 7.157994125990612
 Trys 14 5.011592939863656
-Vienas 4 27.72015994289288
+Vienas 20 27.72015994289288
 
 Dviratis 16 26.495370608854728
 Dviratis 17 20.594431390844203
@@ -40,13 +40,18 @@ Vienas 3 16.615564382024736
 Vienas 18 0.20338860362065336
 
 vartotojai
-Trys 10
-Vienas 110
+Dviratis 30
+Trys 20
+Penki 11
+Vienas 39
 
-Du 10
-Dviratis 20
-Keturi 80
+Du 13
+Dviratis 50
+Trys 38
+Keturi 45
 
-Keturi 10
-Penki 20
-Vienas 10
+Du 30
+Keturi 21
+Penki 50
+Trys 30
+Vienas 20
