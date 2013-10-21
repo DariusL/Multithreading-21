@@ -138,8 +138,6 @@ int Buffer::Take(Counter c)
 {
 	unique_lock<mutex> lock(mtx);
 	emptyCondition.wait(lock, [=]{return buffer.size() > 0 || doneMaking;});
-	if(doneMaking)
-		return 0;
 	lock.unlock();
 	LockAccess();
 	auto i = find(buffer.begin(), buffer.end(), c);
@@ -366,6 +364,7 @@ void MakeObserver(vector<thread> &makers)
 {
 	for(auto &t : makers)
 		t.join();
+	buffer.Done();
 	doneMaking = true;
 }
 
@@ -373,6 +372,5 @@ void UseObserver(vector<future<vector<Counter>>> &users)
 {
 	for(auto &f : users)
 		f.wait();
-	buffer.Done();
 	doneUsing = true;
 }
