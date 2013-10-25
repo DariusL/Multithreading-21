@@ -11,9 +11,11 @@
 
 using namespace std;
 
+//kintamieji parodantys darbu pabaiga
 volatile bool doneMaking = false;
 volatile bool doneUsing = false;
 
+//struktura nepakitus nuo pirmu laboru
 struct Struct
 {
 	string pav;
@@ -43,6 +45,7 @@ string Struct::Print()
 	return ss.str();
 }
 
+//paprastas skaitliukas, aprasyti operatoriai norint lengvai su juo dirbti
 struct Counter
 {
 	string pav;
@@ -56,6 +59,7 @@ public:
 	bool operator<(const Counter &other){return pav < other.pav;}
 };
 
+//skaitliuko sukurimas is failo eilutes
 Counter::Counter(string line)
 {
 	int start, end;
@@ -67,11 +71,12 @@ Counter::Counter(string line)
 	count = stoi(line.substr(start, end - start));
 }
 
+//buferis apsaugotas nuo maigymo is keliu giju
 class Buffer
 {
-	vector<Counter> buffer;
-	condition_variable accessCondition;
-	condition_variable emptyCondition;
+	vector<Counter> buffer;//duomenys
+	condition_variable accessCondition;//salyginins kintamasis naudojamas uzrakint bendra priejima
+	condition_variable emptyCondition;//salyginins kintamasis naudojamas uzrakinti gijas, kol buferis yra tuscias
 	bool accessing;
 	mutex mtx;
 public:
@@ -86,11 +91,13 @@ private:
 	void UnlockAcces();
 };
 
+//baigus rasyma pazadinamos duomenu laukiancios gijos
 void Buffer::Done()
 {
 	emptyCondition.notify_all();
 }
 
+//gija stabdoma arba prileidziama prie buferio
 void Buffer::LockAccess()
 {
 	unique_lock<mutex> lock(mtx);
@@ -98,6 +105,7 @@ void Buffer::LockAccess()
 	accessing = true;
 }
 
+//buferis atrakinamas
 void Buffer::UnlockAcces()
 {
 	unique_lock<mutex> lock(mtx);
@@ -110,6 +118,7 @@ bool Buffer::Add(Counter c)
 	if(doneUsing)
 		return false;
 	LockAccess();
+	//randamas atitinkamo pavadinimo skaitliukas
 	auto i = find(buffer.begin(), buffer.end(), c);
 	if(i != buffer.end())
 	{
@@ -117,6 +126,7 @@ bool Buffer::Add(Counter c)
 	}
 	else
 	{
+		//jei skaitliuko neradome, kuriame nauja reikiamoje vietoje
 		auto size = buffer.size();
 		for(auto i = buffer.begin(); i != buffer.end(); i++)
 		{
@@ -129,6 +139,7 @@ bool Buffer::Add(Counter c)
 		if(buffer.size() == size)
 			buffer.push_back(c);
 	}
+	//pazadinamas viena duomenu laukianti gija
 	emptyCondition.notify_one();
 	UnlockAcces();
 	return true;
@@ -137,19 +148,24 @@ bool Buffer::Add(Counter c)
 int Buffer::Take(Counter c)
 {
 	unique_lock<mutex> lock(mtx);
+	//laukiama jei buferis yra tuscias ir nebaigta rasyti
+	//sis tikrinimas ar nebaigta rasyti nera butinas, bet turi galimybe sukelti deadlock
 	emptyCondition.wait(lock, [=]{return buffer.size() > 0 || doneMaking;});
 	lock.unlock();
 	LockAccess();
+	//randamas atitinkamas skaitliukas
 	auto i = find(buffer.begin(), buffer.end(), c);
 	int taken = 0;
 	if(i != buffer.end())
 	{
+		//paimame kiek imanoma
 		if((*i).count >= c.count)
 			taken = c.count;
 		else
 			taken = (*i).count;
 		(*i).count -= taken;
 
+		//triname tuscia skaitliuka
 		if((*i).count <= 0)
 			buffer.erase(i);
 	}
@@ -191,6 +207,7 @@ Buffer buffer;
 
 int main()
 {
+	//gamintoju ir vartotoju informacija
 	auto input = ReadStuff("LapunasD_L2.txt");
 	auto userStuff = ReadCounters("LapunasD_L2.txt");
 
@@ -203,15 +220,20 @@ int main()
 	vector<future<vector<Counter>>> users;
 	vector<thread> observers;
 
+	//sukuriamos gamintoju gijos
 	for(auto &v : input)
 		makers.emplace_back(Make, v);
 
+	//sukuriamos vartotoju gijos
 	for(auto &v : userStuff)
 		users.push_back(async(Use, v));
 
+	//sukuriamos darba stebincios gijos
+	//sio stebejimo reikejo senesneje versijoje, bet tingejau isimti
 	observers.emplace_back(MakeObserver, ref(makers));
 	observers.emplace_back(UseObserver, ref(users));
 
+	//palaukiam stebejimo
 	for(auto &o : observers)
 		o.join();
 
@@ -219,6 +241,7 @@ int main()
 
 	for(auto &f : users)
 	{
+		//vartotojai naudoja future klase, kuri leidzia lengvai grazinti gijos duomenis
 		auto &res = f.get();
 		for(auto &c : res)
 			cout << c.pav << " " << c.count << endl;
@@ -231,6 +254,7 @@ int main()
 	return 0;
 }
 
+//gamintoju skaitymas, modifikuotas veikti su naujais vartotoju duomenimis
 vector<vector<Struct>> ReadStuff(string file)
 {
 	auto lines = ReadLines(file);
@@ -267,6 +291,7 @@ vector<string> ReadLines(string file)
 	return ret;
 }
 
+//vartotoju duomenu skaitymas
 vector<vector<Counter>> ReadCounters(string file)
 {
 	auto lines = ReadLines(file);
@@ -329,12 +354,14 @@ string Print(int nr, Struct &s)
 	return ss.str();
 }
 
+//gamybos funkcija
 void Make(vector<Struct> stuff)
 {
 	for(auto &s : stuff)
 		buffer.Add(Counter(s.pav, s.kiekis));
 }
 
+//vartojimo funkcija
 vector<Counter> Use(vector<Counter> stuff)
 {
 	auto i = stuff.begin();
@@ -359,6 +386,8 @@ vector<Counter> Use(vector<Counter> stuff)
 	}
 	return ret;
 }
+
+//stebetoju funkcijos
 
 void MakeObserver(vector<thread> &makers)
 {
